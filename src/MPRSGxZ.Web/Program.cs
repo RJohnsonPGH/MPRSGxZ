@@ -129,9 +129,9 @@ if (trustProxyHeaders)
 	app.UseForwardedHeaders();
 }
 
-app.UseStaticFiles();
-
 app.UseRouting();
+
+app.MapStaticAssets();
 
 app.MapControllers();
 
