@@ -1,8 +1,12 @@
 services:
   web:
-    build:
-      context: .
-      dockerfile: src/MPRSGxZ.Web/Dockerfile
+    # Images are published to GHCR by the release workflow (triggered by pushing a v* tag).
+    # Use "latest" for the newest release, or pin to a tag/sha image for reproducibility.
+    # To build locally instead, replace "image" with:
+    #   build:
+    #     context: .
+    #     dockerfile: src/MPRSGxZ.Web/Dockerfile
+    image: ghcr.io/rjohnsonpgh/mprsgxz:latest
     ports:
       - "8080:8080"
     environment:
