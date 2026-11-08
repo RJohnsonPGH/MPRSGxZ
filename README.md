@@ -38,7 +38,6 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
       # - AMP_TRUST_PROXY_HEADERS=false  # uncomment if exposing the port directly
     volumes:
       - amp-data:/data

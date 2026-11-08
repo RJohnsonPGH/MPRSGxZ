@@ -22,6 +22,9 @@ WORKDIR /app
 # Listen on plain HTTP; TLS is expected to be terminated by a reverse proxy in front of the
 # container. See AMP_TRUST_PROXY_HEADERS below for forwarded-header handling.
 ENV ASPNETCORE_URLS=http://+:8080
+# Default to the Production environment; override per deployment if needed (compose/runtime
+# env vars take precedence over this image default).
+ENV ASPNETCORE_ENVIRONMENT=Production
 EXPOSE 8080
 
 # Default persistence locations. Mount volumes at these paths (see docker-compose.yml) so the
