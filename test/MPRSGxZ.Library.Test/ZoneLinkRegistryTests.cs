@@ -17,9 +17,10 @@ public class ZoneLinkRegistryTests
 
 		registry.LinkZone(1, 2);
 
+		int[] expected = [2];
 		Assert.AreEqual(ZoneLinkMode.Primary, registry.GetLinkMode(1));
 		Assert.AreEqual(ZoneLinkMode.Secondary, registry.GetLinkMode(2));
-		CollectionAssert.AreEquivalent(new[] { 2 }, (System.Collections.ICollection)registry.GetSecondaries(1));
+		CollectionAssert.AreEquivalent(expected, (System.Collections.ICollection)registry.GetSecondaries(1));
 		Assert.IsTrue(registry.TryGetPrimary(2, out var primaryId));
 		Assert.AreEqual(1, primaryId);
 	}
@@ -32,7 +33,8 @@ public class ZoneLinkRegistryTests
 		registry.LinkZone(1, 2);
 		registry.LinkZone(1, 3);
 
-		CollectionAssert.AreEquivalent(new[] { 2, 3 }, (System.Collections.ICollection)registry.GetSecondaries(1));
+		int[] expected = [2, 3];
+		CollectionAssert.AreEquivalent(expected, (System.Collections.ICollection)registry.GetSecondaries(1));
 		Assert.AreEqual(ZoneLinkMode.Primary, registry.GetLinkMode(1));
 		Assert.AreEqual(ZoneLinkMode.Secondary, registry.GetLinkMode(2));
 		Assert.AreEqual(ZoneLinkMode.Secondary, registry.GetLinkMode(3));
@@ -125,7 +127,7 @@ public class ZoneLinkRegistryTests
 		registry.LinkZone(1, 3);
 		registry.ClearLinks();
 
-		Assert.AreEqual(0, registry.GetAllLinks().Count);
+		Assert.IsEmpty(registry.GetAllLinks());
 		Assert.AreEqual(ZoneLinkMode.Unlinked, registry.GetLinkMode(1));
 	}
 
@@ -143,7 +145,8 @@ public class ZoneLinkRegistryTests
 			(4, 2)  // invalid: 2 already mirrors 1, should be skipped
 		]);
 
-		CollectionAssert.AreEquivalent(new[] { 2, 3 }, (System.Collections.ICollection)registry.GetSecondaries(1));
+		int[] expected = [2, 3];
+		CollectionAssert.AreEquivalent(expected, (System.Collections.ICollection)registry.GetSecondaries(1));
 		Assert.AreEqual(ZoneLinkMode.Unlinked, registry.GetLinkMode(5));
 		Assert.AreEqual(ZoneLinkMode.Unlinked, registry.GetLinkMode(6));
 		Assert.AreEqual(ZoneLinkMode.Unlinked, registry.GetLinkMode(4));

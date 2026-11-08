@@ -108,7 +108,7 @@ public sealed partial class AmplifierService(ILogger<AmplifierService> logger,
 		LogLoadedZoneMirroringLinks(links.Count);
 	}
 
-	private void ZoneChanged(object sender, ZoneChangedEventArgs e)
+	private void ZoneChanged(object? sender, ZoneChangedEventArgs e)
 	{
 		LogReceivedZoneChangedEvent(e.AmpId, e.ZoneId);
 		hub.Clients.All.SendUpdate();

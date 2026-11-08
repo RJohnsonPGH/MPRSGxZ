@@ -124,11 +124,11 @@ public sealed class ZoneLinkTests(HardwareFixture fixture, ITestOutputHelper out
 			var source = primary.Source == 3 ? 4 : 3;
 			primary.Source = source;
 
-			var first = ZoneStateSnapshotSet.Address(SecondaryZoneId);
+			var (AmpId, ZoneId) = ZoneStateSnapshotSet.Address(SecondaryZoneId);
 			var second = ZoneStateSnapshotSet.Address(OtherSecondaryZoneId);
 
 			var mirrored = await WaitUntilAsync(
-				async () => (await port.TryQueryZoneAsync(first.AmpId, first.ZoneId, Token))?.Source == source
+				async () => (await port.TryQueryZoneAsync(AmpId, ZoneId, Token))?.Source == source
 					&& (await port.TryQueryZoneAsync(second.AmpId, second.ZoneId, Token))?.Source == source,
 				Token);
 

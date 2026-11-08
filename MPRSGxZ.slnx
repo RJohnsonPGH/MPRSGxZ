@@ -4,12 +4,9 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Folder Name="/src/" />
-  <Folder Name="/test/">
-    <Project Path="test/MPRSGxZ.Library.IntegrationTest/MPRSGxZ.Library.IntegrationTest.csproj" />
-  </Folder>
   <Project Path="src/MPRSGxZ.CLI/MPRSGxZ.CLI.csproj" />
   <Project Path="src/MPRSGxZ.Library/MPRSGxZ.Library.csproj" />
   <Project Path="src/MPRSGxZ.Web/MPRSGxZ.Web.csproj" />
+  <Project Path="test/MPRSGxZ.Library.IntegrationTest/MPRSGxZ.Library.IntegrationTest.csproj" />
   <Project Path="test/MPRSGxZ.Library.Test/MPRSGxZ.Library.Test.csproj" />
 </Solution>
