@@ -1,0 +1,207 @@
+﻿@using MPRSGxZ.Library.Enumerators
+@using MPRSGxZ.Web.Services
+
+@inherits LayoutComponentBase
+@implements IAsyncDisposable
+
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject ISnackbar Snackbar
+
+<PageTitle>WebAmp</PageTitle>
+
+<MudThemeProvider Theme="AppTheme.Current" @bind-IsDarkMode="_isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudOverlay @bind-Visible="_isHubConnecting" DarkBackground="true">
+        <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Center" Class="pa-6 rounded-surface elevation-8" Style="background: var(--mud-palette-surface);">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+            <MudText>@_hubStatusText</MudText>
+        </MudStack>
+    </MudOverlay>
+    <MudAppBar Elevation="2" Dense="true">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@ToggleDrawer" aria-label="Toggle navigation" />
+        <MudText Typo="Typo.h6" Class="app-title">WebAmp</MudText>
+        <MudSpacer />
+        @if (_ampConnected)
+        {
+            <MudChip T="string" Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" Class="d-none d-sm-flex">Amplifier connected</MudChip>
+        }
+        else
+        {
+            <MudTooltip Text="@_ampStatusText">
+                <MudChip T="string" Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small">Amplifier offline</MudChip>
+            </MudTooltip>
+        }
+        <MudTooltip Text="@(_isDarkMode ? "Switch to light mode" : "Switch to dark mode")">
+            <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                           Color="Color.Inherit"
+                           @onclick="ToggleDarkMode"
+                           aria-label="Toggle dark mode" />
+        </MudTooltip>
+        <MudIconButton Icon="@Icons.Custom.Brands.GitHub" Color="Color.Inherit" Href="https://github.com/xxbiohazrdxx/MPRSGxZ" Target="_blank" aria-label="View source on GitHub" />
+    </MudAppBar>
+    <MudDrawer @bind-Open="_drawerOpen" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
+        <NavMenu />
+    </MudDrawer>
+    <MudMainContent Class="pt-2 px-2 pb-8">
+        <MudContainer Class="mt-12 px-2" MaxWidth="MaxWidth.False" Style="max-width: 900px;">
+            <CascadingValue Value="@AmpHubConnection">
+                @Body
+            </CascadingValue>
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code
+{
+    private HubConnection? AmpHubConnection;
+    private bool _isHubConnecting = true;
+    private string _hubStatusText = "Connecting";
+    private bool _drawerOpen = true;
+    private bool _isDarkMode;
+
+    private bool _ampConnected => AmplifierService.ConnectionState == ConnectionState.Connected;
+
+    private string _ampStatusText => AmplifierService.ConnectionState switch
+    {
+        ConnectionState.Disconnected => "Amplifier is disconnected",
+        ConnectionState.ErrorCommunication => "Unable to communicate with the amplifier",
+        ConnectionState.ErrorInvalidAddress => "Unable to connect to the amplifier",
+        _ => "Amplifier status is unknown"
+    };
+
+    [Inject]
+    private IAmplifierService AmplifierService { get; set; } = default!;
+
+    void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    // JS interop is not available until the circuit's first render completes, so the theme preference
+    // is read there rather than during initialization.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var isDarkMode = await JSRuntime.InvokeAsync<bool>("mprsTheme.get");
+
+                if (isDarkMode != _isDarkMode)
+                {
+                    _isDarkMode = isDarkMode;
+                    StateHasChanged();
+                }
+            }
+            catch (Exception ex)
+            {
+                // Theme preference is a nicety: fall back to light mode if it cannot be read.
+                LogThemePreferenceReadFailed(Logger, ex);
+            }
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        AmpHubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/amphub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        AmpHubConnection.Reconnecting += _ => InvokeAsync(() =>
+        {
+            _isHubConnecting = true;
+            _hubStatusText = "Reconnecting";
+            return StateHasChangedAsync();
+        });
+
+        AmpHubConnection.Reconnected += _ => InvokeAsync(() =>
+        {
+            _isHubConnecting = false;
+            return StateHasChangedAsync();
+        });
+
+        AmpHubConnection.Closed += async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                _isHubConnecting = true;
+                _hubStatusText = "Connection lost - retrying";
+                await StateHasChangedAsync();
+                Snackbar.Add("Lost the connection to the server. Retrying...", Severity.Warning);
+            });
+
+            await Task.Delay(3000);
+
+            try
+            {
+                await AmpHubConnection.StartAsync();
+                await InvokeAsync(() =>
+                {
+                    _isHubConnecting = false;
+                    return StateHasChangedAsync();
+                });
+            }
+            catch (Exception ex)
+            {
+                // The retry loop is one-shot per close event; the next failure raises Closed again.
+                LogHubRetryFailed(Logger, ex);
+            }
+        };
+
+        try
+        {
+            await AmpHubConnection.StartAsync();
+            _isHubConnecting = false;
+        }
+        catch (Exception ex)
+        {
+            // Automatic reconnect covers transient failures; the overlay keeps the user informed meanwhile.
+            LogHubStartFailed(Logger, ex);
+        }
+    }
+
+    private async Task ToggleDarkMode()
+    {
+        _isDarkMode = !_isDarkMode;
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("mprsTheme.set", _isDarkMode);
+        }
+        catch (Exception ex)
+        {
+            // The theme still toggles for this session even when persistence fails (e.g. storage disabled).
+            LogThemePreferenceSaveFailed(Logger, ex);
+        }
+    }
+
+    // SignalR raises its events off the renderer's synchronization context, so state changes
+    // must be marshalled through InvokeAsync. The returned task lets failures be observed.
+    private Task StateHasChangedAsync()
+    {
+        try
+        {
+            StateHasChanged();
+            return Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            // The component may already be disposed when a connection event lands late.
+            LogHubRenderFailed(Logger, ex);
+            return Task.CompletedTask;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (AmpHubConnection is not null)
+        {
+            await AmpHubConnection.DisposeAsync();
+        }
+    }
+}

@@ -1,0 +1,99 @@
+﻿@using MPRSGxZ.Web.Services
+@using Microsoft.EntityFrameworkCore;
+@using MPRSGxZ.Web.Data
+@using MPRSGxZ.Web.Models
+
+@page "/source"
+
+@inject IDbContextFactory<AmplifierDbContext> ContextFactory
+@inject IAmplifierService AmplifierService
+@inject ISnackbar Snackbar
+
+<PageTitle>Sources</PageTitle>
+
+@if (_loaded)
+{
+<MudPaper Class="pa-4" Elevation="2">
+	<MudStack Spacing="2">
+		<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+			<MudIcon Icon="@Icons.Material.Filled.MusicNote" Color="Color.Primary" Size="Size.Small" />
+			<MudText Typo="Typo.h6">Sources</MudText>
+		</MudStack>
+		<MudSimpleTable Dense="true" Hover="true">
+			<thead>
+				<tr>
+					<th>Input</th>
+					<th>Name</th>
+					<th>Enabled</th>
+				</tr>
+			</thead>
+			<tbody>
+				@foreach (var currentSource in _sources)
+				{
+					<tr>
+						<td><MudText Typo="Typo.body1">@currentSource.Id</MudText></td>
+						<td><MudInput MaxLength="25" @bind-Value="@currentSource.Name" @bind-Value:after="@(async () => await Changed(@currentSource))" /></td>
+						<td><MudSwitch @bind-Value="@currentSource.Enabled" @bind-Value:after="@(async () => await Changed(@currentSource))" Color="Color.Primary" /></td>
+					</tr>
+				}
+			</tbody>
+		</MudSimpleTable>
+	</MudStack>
+</MudPaper>
+}
+
+@code
+{
+	private bool _loaded = false;
+	private IEnumerable<SoftwareSource> _sources = default!;
+
+	protected override async Task OnInitializedAsync()
+	{
+		using var context = await ContextFactory.CreateDbContextAsync();
+		_sources = await context.Sources
+			.OrderBy(x => x.Id)
+			.ToListAsync();
+
+		_loaded = true;
+	}
+
+	private async Task Changed(SoftwareSource entity)
+	{
+		try
+		{
+			using var context = await ContextFactory.CreateDbContextAsync();
+			context.Sources.Update(entity);
+			await context.SaveChangesAsync();
+
+			LogSourceUpdated(Logger, entity.Id, entity.Name, entity.Enabled);
+		}
+		catch (Exception ex)
+		{
+			// The edit is abandoned and the row reverted so the table always reflects stored state.
+			LogSourceUpdateFailed(Logger, ex, entity.Id);
+
+			await RevertSourceAsync(entity.Id);
+
+			Snackbar.Add($"Source {entity.Id} could not be saved.", Severity.Error);
+		}
+	}
+
+	private async Task RevertSourceAsync(int sourceId)
+	{
+		try
+		{
+			using var context = await ContextFactory.CreateDbContextAsync();
+			var stored = await context.Sources.AsNoTracking().SingleAsync(x => x.Id == sourceId);
+			var editable = _sources.Single(x => x.Id == sourceId);
+
+			editable.Name = stored.Name;
+			editable.Enabled = stored.Enabled;
+		}
+		catch (Exception ex)
+		{
+			// Reverting is best-effort: if even the reload fails the row keeps the attempted value,
+			// and the error snackbar has already told the user the save did not happen.
+			LogSourceRevertFailed(Logger, ex, sourceId);
+		}
+	}
+}

@@ -1,0 +1,18 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: src/MPRSGxZ.Web/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      # - AMP_TRUST_PROXY_HEADERS=false  # uncomment if exposing this port directly without a reverse proxy in front of it
+    volumes:
+      - amp-data:/data
+      - amp-logs:/logs
+    restart: unless-stopped
+
+volumes:
+  amp-data:
+  amp-logs:

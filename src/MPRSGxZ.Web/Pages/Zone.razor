@@ -1,0 +1,198 @@
+﻿@using MPRSGxZ.Web.Data
+@using MPRSGxZ.Web.Models
+@using MPRSGxZ.Web.Services
+@using Microsoft.EntityFrameworkCore;
+
+@page "/zone"
+
+@inject IDbContextFactory<AmplifierDbContext> ContextFactory
+@inject IAmplifierService AmplifierService
+@inject ISnackbar Snackbar
+
+<PageTitle>Zones</PageTitle>
+
+@if (_loaded)
+{
+	<MudStack Spacing="3">
+		@for (int i = 0; i < 3; i++)
+		{
+			var intermediate = i;
+			<MudCard Style="position: relative;" Elevation="2">
+				<MudOverlay Visible="@((intermediate + 1) > _amplifierCount)" DarkBackground="true" Absolute="true">
+					<MudCard Class="pa-4" Elevation="4">
+						<MudText Typo="Typo.h6">Amplifier @(intermediate + 1) not connected</MudText>
+					</MudCard>
+				</MudOverlay>
+				<MudCardContent>
+					<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-2">
+						<MudIcon Icon="@Icons.Material.Filled.Speaker" Color="Color.Primary" Size="Size.Small" />
+						<MudText Typo="Typo.h6">Amplifier @(intermediate + 1)</MudText>
+					</MudStack>
+					<MudSimpleTable Dense="true" Hover="true">
+						<thead>
+							<tr>
+								<th>Zone</th>
+								<th>Name</th>
+								<th>Enabled</th>
+								<th>Keypad</th>
+								<th>Mirrors</th>
+							</tr>
+						</thead>
+						<tbody>
+							@foreach (var currentZone in _zones.Skip(intermediate * 6).Take(6))
+							{
+								<tr>
+									<td><MudText Typo="Typo.body1">@currentZone.Id</MudText></td>
+									<td><MudInput MaxLength="25" @bind-Value="@currentZone.Name" @bind-Value:after="@(async () => await Changed(@currentZone))" /></td>
+									<td><MudSwitch @bind-Value="@currentZone.Enabled" @bind-Value:after="@(async () => await Changed(@currentZone))" Color="Color.Primary" /></td>
+									<td>
+										@if (HasKeypad(currentZone))
+										{
+											<MudTooltip Text="A wall keypad is connected to this zone">
+												<MudIcon Icon="@Icons.Material.Filled.Dialpad" Color="Color.Primary" />
+											</MudTooltip>
+										}
+									</td>
+									<td>
+										<MudSelect T="int" Value="@(currentZone.MirrorsZoneId ?? 0)" ValueChanged="@(async (int value) => await MirrorsChanged(currentZone, value))"
+											Margin="Margin.Dense" Dense="true" AnchorOrigin="Origin.BottomCenter" Style="min-width: 140px;">
+											<MudSelectItem T="int" Value="0">None</MudSelectItem>
+											@foreach (var primaryOption in EligiblePrimaries(currentZone))
+											{
+												<MudSelectItem T="int" Value="@primaryOption.Id">@primaryOption.Name</MudSelectItem>
+											}
+										</MudSelect>
+									</td>
+								</tr>
+							}
+						</tbody>
+					</MudSimpleTable>
+				</MudCardContent>
+			</MudCard>
+		}
+	</MudStack>
+}
+
+@code
+{
+	[CascadingParameter]
+	public HubConnection? AmpHubConnection { get; set; }
+
+	private bool _loaded = false;
+	private int _amplifierCount => AmplifierService.Amplifier.AmplifierCount;
+	private List<SoftwareZone> _zones = default!;
+
+	protected override async Task OnInitializedAsync()
+	{
+		// Keypad presence is live hardware state, so refresh when the amplifier reports any change.
+		AmpHubConnection?.On("SendUpdate", ChangedExternally);
+
+		await ReloadZonesAsync();
+
+		_loaded = true;
+	}
+
+	private Task ChangedExternally() => InvokeAsync(StateHasChanged);
+
+	private async Task ReloadZonesAsync()
+	{
+		using var context = await ContextFactory.CreateDbContextAsync();
+		_zones = await context.Zones
+			.OrderBy(x => x.Id)
+			.ToListAsync();
+	}
+
+	private async Task<bool> Changed(SoftwareZone entity)
+	{
+		try
+		{
+			using var context = await ContextFactory.CreateDbContextAsync();
+			context.Zones.Update(entity);
+			await context.SaveChangesAsync();
+
+			LogZoneUpdated(Logger, entity.Id, entity.Name, entity.Enabled, entity.MirrorsZoneId);
+
+			return true;
+		}
+		catch (Exception ex)
+		{
+			// The edit is abandoned and the row reverted so the table always reflects stored state.
+			LogZoneUpdateFailed(Logger, ex, entity.Id);
+
+			await RevertZoneAsync(entity.Id);
+
+			Snackbar.Add($"Zone {entity.Id} could not be saved.", Severity.Error);
+
+			return false;
+		}
+	}
+
+	private async Task RevertZoneAsync(int zoneId)
+	{
+		try
+		{
+			using var context = await ContextFactory.CreateDbContextAsync();
+			var stored = await context.Zones.AsNoTracking().SingleAsync(x => x.Id == zoneId);
+			var editable = _zones.Single(x => x.Id == zoneId);
+
+			editable.Name = stored.Name;
+			editable.Enabled = stored.Enabled;
+			editable.MirrorsZoneId = stored.MirrorsZoneId;
+		}
+		catch (Exception ex)
+		{
+			// Reverting is best-effort: if even the reload fails the row keeps the attempted value,
+			// and the error snackbar has already told the user the save did not happen.
+			LogZoneRevertFailed(Logger, ex, zoneId);
+		}
+	}
+
+	/// <summary>
+	/// Whether the hardware reports a wall keypad connected to this zone. This is read from the live amplifier state
+	/// rather than the database because it reflects how the zone is physically wired and is not configurable.
+	/// </summary>
+	private bool HasKeypad(SoftwareZone zone) =>
+		AmplifierService.Amplifier.Zones.SingleOrDefault(x => x.Id == zone.Id)?.Keypad ?? false;
+
+	/// <summary>
+	/// Zones eligible to be picked as the primary that <paramref name="zone"/> mirrors: enabled,
+	/// not itself, and not already a secondary of something else (no chaining). If
+	/// <paramref name="zone"/> already has other zones mirroring it (i.e. it is a primary), it
+	/// cannot also become a secondary, so no options are offered.
+	/// </summary>
+	private IEnumerable<SoftwareZone> EligiblePrimaries(SoftwareZone zone)
+	{
+		var zoneIsPrimary = _zones.Any(x => x.MirrorsZoneId == zone.Id);
+		if (zoneIsPrimary)
+		{
+			return [];
+		}
+
+		return _zones.Where(x => x.Id != zone.Id && x.Enabled && x.MirrorsZoneId == null);
+	}
+
+	private async Task MirrorsChanged(SoftwareZone zone, int primaryId)
+	{
+		zone.MirrorsZoneId = primaryId == 0 ? null : primaryId;
+
+		// Reloading the in-memory links from a failed save would drop the zone's existing mirroring, so only
+		// reload once the new value is actually persisted.
+		if (!await Changed(zone))
+		{
+			return;
+		}
+
+		LogMirroringChanged(Logger, zone.Id, zone.MirrorsZoneId);
+
+		try
+		{
+			await AmplifierService.ReloadZoneLinksAsync();
+		}
+		catch (Exception ex)
+		{
+			LogMirroringChangeFailed(Logger, ex, zone.Id);
+
+			Snackbar.Add($"Zone {zone.Id} was saved, but the hardware mirroring links could not be updated.", Severity.Warning);
+		}
+	}
+}

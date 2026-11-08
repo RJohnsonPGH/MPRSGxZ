@@ -1,0 +1,221 @@
+﻿@page "/connection"
+
+@using System.Net
+@using MPRSGxZ.Library.Enumerators
+@using MPRSGxZ.Web.Data
+@using MPRSGxZ.Web.Models
+@using MPRSGxZ.Web.Services
+@using Microsoft.EntityFrameworkCore
+
+@inject IDbContextFactory<AmplifierDbContext> _contextFactory;
+@inject IAmplifierService AmplifierService
+@inject ISnackbar Snackbar
+
+<PageTitle>Connection Settings</PageTitle>
+
+@if (_loaded)
+{
+<MudStack Spacing="3">
+	<MudPaper Class="pa-4" Elevation="2">
+		<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+			@if (_amplifierConnected)
+			{
+				<MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" />
+			}
+			else if (_amplifierErrored)
+			{
+				<MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Large" />
+			}
+			else
+			{
+				<MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Large" />
+			}
+			<MudStack Spacing="0">
+				<MudText Typo="Typo.h6">Amplifier status</MudText>
+				<MudText Typo="Typo.body2" Color="Color.Secondary">@connectionDetail</MudText>
+				<MudText Typo="Typo.caption" Color="Color.Secondary">@($"{_connectionSetting.Address}:{_connectionSetting.Port}")</MudText>
+			</MudStack>
+			<MudSpacer />
+			<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+				Disabled="_reconnectRunning" OnClick="Reconnect">
+				@(_reconnectRunning ? "Reconnecting..." : "Reconnect")
+			</MudButton>
+		</MudStack>
+	</MudPaper>
+	<MudPaper Class="pa-4" Elevation="2">
+		<MudStack Row="true" AlignItems="AlignItems.Start" Spacing="3">
+			<MudTextField T="string" Value="@_connectionSetting.Address" ValueChanged="AddressChanged" HelperText="Network address or hostname" Label="Address"
+				Required="true" RequiredError="Address is required" OnlyValidateIfDirty="true" Margin="Margin.Dense"
+				Validation="@(new Func<string, string>(ValidateAddress))" />
+			<MudTextField T="int" Value="@_connectionSetting.Port" ValueChanged="PortChanged" HelperText="Port number (0-65535)" Label="Port"
+				Required="true" RequiredError="Port is required" OnlyValidateIfDirty="true" Margin="Margin.Dense"
+				Validation="@(new Func<int, string>(ValidatePort))" />
+		</MudStack>
+		<MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">Changes are saved automatically and take effect immediately.</MudText>
+	</MudPaper>
+</MudStack>
+}
+
+@code
+{
+	[CascadingParameter]
+	public HubConnection? AmpHubConnection { get; set; }
+
+	private bool _loaded = false;
+	private bool _reconnectRunning = false;
+
+	private bool _amplifierConnected => AmplifierService.ConnectionState == ConnectionState.Connected;
+	private bool _amplifierErrored => AmplifierService.ConnectionState is ConnectionState.ErrorCommunication or ConnectionState.ErrorInvalidAddress;
+
+	private string connectionDetail => AmplifierService.ConnectionState switch
+	{
+		ConnectionState.Connected => "Connected",
+		ConnectionState.Disconnected => "Disconnected",
+		ConnectionState.ErrorCommunication => "Unable to communicate with amplifier",
+		ConnectionState.ErrorInvalidAddress => "Unable to connect to amplifier",
+		_ => "Unknown error"
+	};
+
+	private ConnectionSetting _connectionSetting = default!;
+
+	protected override async Task OnInitializedAsync()
+	{
+		// Connection status is live hardware state, so refresh when the amplifier reports any change.
+		AmpHubConnection?.On("SendUpdate", StatusChanged);
+
+		using var context = await _contextFactory.CreateDbContextAsync();
+		_connectionSetting = await context.ConnectionSettings.SingleAsync();
+
+		_loaded = true;
+	}
+
+	private Task StatusChanged() => InvokeAsync(StateHasChanged);
+
+	private async Task Reconnect()
+	{
+		_reconnectRunning = true;
+
+		try
+		{
+			var state = await AmplifierService.ReconnectAsync();
+
+			if (state == ConnectionState.Connected)
+			{
+				Snackbar.Add("Reconnected to the amplifier.", Severity.Success);
+			}
+			else
+			{
+				Snackbar.Add($"Reconnect failed: {connectionDetail}.", Severity.Error);
+			}
+		}
+		catch (Exception ex)
+		{
+			// The reconnect attempt is abandoned but the page stays usable.
+			LogReconnectButtonFailed(Logger, ex);
+
+			Snackbar.Add("Reconnect failed with an unexpected error.", Severity.Error);
+		}
+		finally
+		{
+			_reconnectRunning = false;
+		}
+	}
+
+	private string ValidateAddress(string address)
+	{
+		if (string.IsNullOrWhiteSpace(address))
+		{
+			return "Address is required";
+		}
+
+		// Accept either a valid IP address or a hostname (loosely validated - any non-whitespace value that
+		// contains only characters legal in a hostname).
+		if (IPAddress.TryParse(address, out _))
+		{
+			return null!;
+		}
+
+		if (Uri.CheckHostName(address) != UriHostNameType.Unknown)
+		{
+			return null!;
+		}
+
+		return "Unable to validate address";
+	}
+
+	private string ValidatePort(int port)
+	{
+		if (port < 0 || port > 65535)
+		{
+			return "Port must be between 0 and 65535";
+		}
+
+		return null!;
+	}
+
+	private async Task AddressChanged(string address)
+	{
+		var validationError = ValidateAddress(address);
+		if (validationError is not null)
+		{
+			// The field shows the error and keeps the previous value, so the page continues to work normally.
+			LogAddressRejected(Logger, address, validationError);
+			return;
+		}
+
+		try
+		{
+			using var context = await _contextFactory.CreateDbContextAsync();
+			_connectionSetting = await context.ConnectionSettings.SingleAsync();
+
+			_connectionSetting.Address = address;
+
+			await context.SaveChangesAsync();
+			LogAddressChanged(Logger, address);
+
+			await AmplifierService.ReconnectAsync();
+		}
+		catch (Exception ex)
+		{
+			// The setting change is abandoned but the page stays usable.
+			LogAddressChangeFailed(Logger, ex, address);
+
+			Snackbar.Add("Address could not be saved.", Severity.Error);
+		}
+
+		StateHasChanged();
+	}
+
+	private async Task PortChanged(int port)
+	{
+		var validationError = ValidatePort(port);
+		if (validationError is not null)
+		{
+			// The field shows the error and keeps the previous value, so the page continues to work normally.
+			LogPortRejected(Logger, port, validationError);
+			return;
+		}
+
+		try
+		{
+			using var context = await _contextFactory.CreateDbContextAsync();
+			_connectionSetting = await context.ConnectionSettings.SingleAsync();
+
+			_connectionSetting.Port = port;
+
+			await context.SaveChangesAsync();
+			LogPortChanged(Logger, port);
+
+			await AmplifierService.ReconnectAsync();
+		}
+		catch (Exception ex)
+		{
+			// The setting change is abandoned but the page stays usable.
+			LogPortChangeFailed(Logger, ex, port);
+
+			Snackbar.Add("Port could not be saved.", Severity.Error);
+		}
+
+		StateHasChanged();
+	}
+}

@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+	  <ImplicitUsings>enable</ImplicitUsings>
+	  <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Data\**" />
+    <EmbeddedResource Remove="Data\**" />
+    <None Remove="Data\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Polly" Version="8.7.0" />
+  </ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="AmpTest" />
+		<!-- The tests drive the wire protocol directly, so they need the internal command types. -->
+		<InternalsVisibleTo Include="MPRSGxZ.Library.IntegrationTest" />
+		<InternalsVisibleTo Include="MPRSGxZ.Library.Test" />
+	</ItemGroup>
+
+</Project>

@@ -1,0 +1,10 @@
+﻿@page "/"
+@namespace MPRSGxZ.Web.Pages
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@{
+    Layout = "_Layout";
+}
+
+@* Server (not prerendered): the layout opens a SignalR connection during initialization, and a prerendered
+   pass would open one per HTTP request that is never disposed, and cannot use JS interop for the theme. *@
+<component type="typeof(App)" render-mode="Server" />

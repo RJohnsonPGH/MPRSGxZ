@@ -1,0 +1,339 @@
+@using MPRSGxZ.Library.Enumerators
+@using MPRSGxZ.Library.Hardware
+@using MPRSGxZ.Web.Data
+@using MPRSGxZ.Web.Models
+@using MPRSGxZ.Web.Services
+@using Microsoft.EntityFrameworkCore;
+
+@page "/"
+
+@inject IDbContextFactory<AmplifierDbContext> ContextFactory
+@inject IAmplifierService AmplifierService
+@inject ISnackbar Snackbar
+
+<PageTitle>WebAmp</PageTitle>
+
+@if (_loaded && _zones.Count == 0)
+{
+	<MudPaper Class="pa-6" Elevation="2">
+		<MudStack AlignItems="AlignItems.Center" Spacing="2">
+			<MudIcon Icon="@Icons.Material.Filled.Info" Color="Color.Info" Size="Size.Large" />
+			<MudText Typo="Typo.h6">No zones are available</MudText>
+			<MudText Typo="Typo.body2" Align="Align.Center">Enable at least one zone on the Zones page to control the amplifier.</MudText>
+			<MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/Zone">Open Zones</MudButton>
+		</MudStack>
+	</MudPaper>
+}
+else if (_loaded)
+{
+	<MudOverlay Visible="_notConnected" DarkBackground="true">
+		<MudPaper Class="pa-6" Elevation="8" Style="pointer-events: none;">
+			<MudStack Row="true" Spacing="3" AlignItems="AlignItems.Center">
+				<MudIcon Icon="@disconnectIcon" Color="Color.Error" Size="Size.Large" />
+				<MudStack Spacing="0">
+					<MudText Typo="Typo.h6">Amplifier not connected</MudText>
+					<MudText Typo="Typo.body2" Color="Color.Secondary">Check the connection settings, then try again.</MudText>
+				</MudStack>
+			</MudStack>
+		</MudPaper>
+	</MudOverlay>
+	<MudSwipeArea OnSwipeEnd="@OnSwipeEnd">
+		<MudStack Spacing="3">
+			<MudPaper Class="pa-2" Elevation="2">
+				<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+					<MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Color="Color.Primary" OnClick="PreviousZone" aria-label="Previous zone" />
+					<MudSelect T="int" Value="_zoneIndex" ValueChanged="GoToZone" Margin="Margin.Dense" Variant="Variant.Outlined"
+						Dense="true" AnchorOrigin="Origin.BottomCenter" RelativeWidth="DropdownWidth.Relative"
+						Style="min-width: 140px; max-width: 220px;">
+						@for (int i = 0; i < _zones.Count; i++)
+						{
+							var optionIndex = i;
+							<MudSelectItem T="int" Value="@optionIndex">@_zones[optionIndex].Name</MudSelectItem>
+						}
+					</MudSelect>
+					<MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" OnClick="NextZone" aria-label="Next zone" />
+				</MudStack>
+			</MudPaper>
+			<MudPaper Class="pa-4" Elevation="2">
+				<MudStack Spacing="4">
+					<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+						<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+							<MudIcon Icon="@Icons.Material.Filled.PowerSettingsNew" Color="Color.Primary" />
+							<MudText Typo="Typo.body1">Power</MudText>
+							@if (_currentZone.Keypad)
+							{
+								<MudTooltip Text="A wall keypad is connected to this zone">
+									<MudIcon Icon="@Icons.Material.Filled.Dialpad" Color="Color.Primary" Size="Size.Small" />
+								</MudTooltip>
+							}
+						</MudStack>
+						<MudSwitch @bind-Value="@_currentZone.Power" Color="Color.Primary" />
+					</MudStack>
+					<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+						<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+							<MudIcon Icon="@Icons.Material.Filled.VolumeOff" Color="Color.Primary" />
+							<MudText Typo="Typo.body1">Mute</MudText>
+						</MudStack>
+						<MudSwitch Disabled="@(!_currentZone.Power)" @bind-Value="@_currentZone.Mute" Color="Color.Primary" />
+					</MudStack>
+					<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+						<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+							<MudIcon Icon="@Icons.Material.Filled.LibraryMusic" Color="Color.Primary" />
+							<MudText Typo="Typo.body1">Source</MudText>
+						</MudStack>
+						<MudSelect T="int" Disabled="@(!_currentZone.Power)" @bind-Value="@_currentZone.Source" Margin="Margin.Dense"
+							Dense="true" AnchorOrigin="Origin.BottomCenter" Style="min-width: 160px;">
+							@foreach (var currentSource in _sources)
+							{
+								<MudSelectItem T="int" Value="@currentSource.Id">@currentSource.Name</MudSelectItem>
+							}
+						</MudSelect>
+					</MudStack>
+				</MudStack>
+			</MudPaper>
+			<MudPaper Class="pa-4" Elevation="2">
+				<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+					<MudIconButton Icon="@Icons.Material.Filled.VolumeDown" Disabled="@(!_currentZone.Power)" Color="Color.Primary" OnClick="VolumeDown" aria-label="Volume down" />
+					<MudSlider Value="@_currentZone.Volume" ValueChanged="@(async (int v) => await SetVolume(v))"
+						Disabled="@(!_currentZone.Power)" Variant="Variant.Filled" Min="0" Max="38" Step="1" Immediate="false"
+						Class="flex-grow-1" />
+					<MudIconButton Icon="@Icons.Material.Filled.VolumeUp" Disabled="@(!_currentZone.Power)" Color="Color.Primary" OnClick="VolumeUp" aria-label="Volume up" />
+					<MudTooltip Text="Current volume">
+						<MudChip T="string" Color="@(_currentZone.Mute ? Color.Default : Color.Primary)" Variant="Variant.Text" Size="Size.Small" Style="min-width: 64px;">
+							@(_currentZone.Mute ? "Muted" : _currentZone.Volume.ToString())
+						</MudChip>
+					</MudTooltip>
+				</MudStack>
+			</MudPaper>
+			<MudExpansionPanels Elevation="2">
+				<MudExpansionPanel Text="Audio Settings">
+					<MudGrid Spacing="4" Class="pt-2">
+						<MudItem xs="12" sm="4">
+							<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+								<MudIcon Icon="@Icons.Material.Filled.TrendingUp" Color="Color.Primary" />
+								<MudText Typo="Typo.body1">Treble</MudText>
+							</MudStack>
+						</MudItem>
+						<MudItem xs="12" sm="8">
+							<MudSlider Value="@_currentZone.Treble" ValueChanged="@(async (int v) => await SetTone(v, "treble"))"
+								Disabled="@(!_currentZone.Power)" Variant="Variant.Filled" Min="0" Max="14" Step="1" Immediate="false"
+								ValueLabel="true">
+								<ValueLabelContent Context="value">@(CenteredText(value.Value))</ValueLabelContent>
+							</MudSlider>
+						</MudItem>
+						<MudItem xs="12" sm="4">
+							<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+								<MudIcon Icon="@Icons.Material.Filled.TrendingDown" Color="Color.Primary" />
+								<MudText Typo="Typo.body1">Bass</MudText>
+							</MudStack>
+						</MudItem>
+						<MudItem xs="12" sm="8">
+							<MudSlider Value="@_currentZone.Bass" ValueChanged="@(async (int v) => await SetTone(v, "bass"))"
+								Disabled="@(!_currentZone.Power)" Variant="Variant.Filled" Min="0" Max="14" Step="1" Immediate="false"
+								ValueLabel="true">
+								<ValueLabelContent Context="value">@(CenteredText(value.Value))</ValueLabelContent>
+							</MudSlider>
+						</MudItem>
+						<MudItem xs="12" sm="4">
+							<MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+								<MudIcon Icon="@Icons.Material.Filled.AlignHorizontalCenter" Color="Color.Primary" />
+								<MudText Typo="Typo.body1">Balance</MudText>
+							</MudStack>
+						</MudItem>
+						<MudItem xs="12" sm="8">
+							<MudSlider Value="@_currentZone.Balance" ValueChanged="@(async (int v) => await SetBalance(v))"
+								Disabled="@(!_currentZone.Power)" Variant="Variant.Filled" Min="0" Max="14" Step="1" Immediate="false"
+								ValueLabel="true">
+								<ValueLabelContent Context="value">@(BalanceText(value.Value))</ValueLabelContent>
+							</MudSlider>
+						</MudItem>
+					</MudGrid>
+				</MudExpansionPanel>
+			</MudExpansionPanels>
+		</MudStack>
+	</MudSwipeArea>
+}
+
+@code
+{
+	[CascadingParameter]
+	public HubConnection? AmpHubConnection { get; set; }
+
+	private bool _loaded = false;
+
+	private bool _notConnected => AmplifierService.ConnectionState != ConnectionState.Connected;
+
+	private List<ZoneEntry> _zones = [];
+	private int _zoneIndex;
+
+	private HardwareZone _currentZone => _zones[_zoneIndex].Hardware;
+
+	private IEnumerable<SoftwareSource> _sources = default!;
+
+	private const int ToneCenter = 7;
+
+	private const string disconnectIcon = @"<svg xmlns=""http://www.w3.org/2000/svg"" viewBox=""0 0 24 24""><title>lan-disconnect</title><path d=""M4,1C2.89,1 2,1.89 2,3V7C2,8.11 2.89,9 4,9H1V11H13V9H10C11.11,9 12,8.11 12,7V3C12,1.89 11.11,1 10,1H4M4,3H10V7H4V3M14,13C12.89,13 12,13.89 12,15V19C12,20.11 12.89,21 14,21H11V23H23V21H20C21.11,21 22,20.11 22,19V15C22,13.89 21.11,13 20,13H14M3.88,13.46L2.46,14.88L4.59,17L2.46,19.12L3.88,20.54L6,18.41L8.12,20.54L9.54,19.12L7.41,17L9.54,14.88L8.12,13.46L6,15.59L3.88,13.46M14,15H20V19H14V15Z"" /></svg>";
+
+	private sealed record ZoneEntry(int Id, string Name, HardwareZone Hardware);
+
+	protected override async Task OnInitializedAsync()
+	{
+		// The layout builds the connection before children initialize; the null check only guards against
+		// a hub that failed to be created at all.
+		AmpHubConnection?.On("SendUpdate", Changed);
+
+		await ReloadZonesAsync();
+
+		_sources = await QuerySourcesAsync();
+
+		_loaded = true;
+	}
+
+	public async void OnSwipeEnd(SwipeEventArgs args)
+	{
+		if (args.SwipeDirection == SwipeDirection.LeftToRight)
+		{
+			await PreviousZone();
+		}
+		else if (args.SwipeDirection == SwipeDirection.RightToLeft)
+		{
+			await NextZone();
+		}
+	}
+
+	/// <remarks>
+	/// SignalR invokes its handlers on a background thread, not the renderer's synchronization context, so
+	/// <see cref="ComponentBase.StateHasChanged"/> must be marshalled through
+	/// <see cref="ComponentBase.InvokeAsync(Action)"/> or it throws "The current thread is not associated with the
+	/// Dispatcher". The task is returned rather than discarded so a render failure is observed by the caller.
+	/// </remarks>
+	public Task Changed() => InvokeAsync(StateHasChanged);
+
+	public async Task PreviousZone()
+	{
+		await ReloadZonesAsync();
+
+		_zoneIndex = (_zoneIndex - 1 + _zones.Count) % Math.Max(_zones.Count, 1);
+	}
+
+	public async Task NextZone()
+	{
+		await ReloadZonesAsync();
+
+		_zoneIndex = (_zoneIndex + 1) % Math.Max(_zones.Count, 1);
+	}
+
+	private async Task GoToZone(int index)
+	{
+		await ReloadZonesAsync();
+
+		if (index >= 0 && index < _zones.Count)
+		{
+			_zoneIndex = index;
+		}
+	}
+
+	private Task SetVolume(int volume)
+	{
+		_currentZone.Volume = Math.Clamp(volume, 0, 38);
+
+		return NotifyIfDisconnected("Volume");
+	}
+
+	private Task SetTone(int value, string setting)
+	{
+		switch (setting)
+		{
+			case "treble":
+				_currentZone.Treble = Math.Clamp(value, 0, 14);
+				break;
+			case "bass":
+				_currentZone.Bass = Math.Clamp(value, 0, 14);
+				break;
+		}
+
+		return NotifyIfDisconnected(char.ToUpper(setting[0]) + setting[1..]);
+	}
+
+	private Task SetBalance(int value)
+	{
+		_currentZone.Balance = Math.Clamp(value, 0, 14);
+
+		return NotifyIfDisconnected("Balance");
+	}
+
+	private void VolumeDown() => _currentZone.Volume = Math.Clamp(_currentZone.Volume - 1, 0, 38);
+
+	private void VolumeUp() => _currentZone.Volume = Math.Clamp(_currentZone.Volume + 1, 0, 38);
+
+	private string CenteredText(double value) => (value - ToneCenter).ToString("+0;-0;0");
+
+	private string BalanceText(double value)
+	{
+		var offset = (int)(value - ToneCenter);
+
+		return offset switch
+		{
+			0 => "C",
+			> 0 => $"+{offset}R",
+			_ => $"{-offset}L"
+		};
+	}
+
+	/// <summary>
+	/// Rebuilds the selectable zone list (enabled zones that are not mirroring another zone) from the database
+	/// joined against the live hardware zones. The previous selection is preserved when it is still selectable.
+	/// </summary>
+	private async Task ReloadZonesAsync()
+	{
+		var previousId = _zones.Count > 0 ? _zones[_zoneIndex].Id : 0;
+
+		try
+		{
+			using var context = await ContextFactory.CreateDbContextAsync();
+			var configuredZones = await context.Zones
+				.Where(x => x.Enabled && x.MirrorsZoneId == null)
+				.OrderBy(x => x.Id)
+				.ToListAsync();
+
+			_zones = [
+				.. from zone in configuredZones
+					join hardware in AmplifierService.Amplifier.Zones.Take(AmplifierService.Amplifier.AmplifierCount * 6)
+						on zone.Id equals hardware.Id
+					select new ZoneEntry(zone.Id, zone.Name, hardware)
+			];
+		}
+		catch (Exception ex)
+		{
+			// The page keeps its previous zone list so it stays usable.
+			LogZoneListReloadFailed(Logger, ex);
+			return;
+		}
+
+		var index = _zones.FindIndex(x => x.Id == previousId);
+		_zoneIndex = index >= 0 ? index : 0;
+	}
+
+	private async Task<IEnumerable<SoftwareSource>> QuerySourcesAsync()
+	{
+		using var context = await ContextFactory.CreateDbContextAsync();
+		return await context.Sources
+			.Where(x => x.Enabled)
+			.OrderBy(x => x.Id)
+			.ToListAsync();
+	}
+
+	/// <summary>
+	/// Warns when a control was adjusted while the amplifier is unreachable. Writes to an offline amplifier fail
+	/// silently in the hardware layer, so the display will be corrected by the next status poll once it returns.
+	/// </summary>
+	private Task NotifyIfDisconnected(string setting)
+	{
+		if (_notConnected)
+		{
+			Snackbar.Add($"{setting} could not be sent: the amplifier is not connected.", Severity.Warning);
+		}
+
+		return Task.CompletedTask;
+	}
+}

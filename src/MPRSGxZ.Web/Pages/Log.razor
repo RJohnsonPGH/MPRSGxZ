@@ -1,0 +1,136 @@
+﻿@page "/log"
+@using MPRSGxZ.Web.Logging
+@implements IDisposable
+
+@inject InMemoryLogStore LogStore
+@inject ISnackbar Snackbar
+
+<PageTitle>Logs</PageTitle>
+
+<MudPaper Class="pa-4" Elevation="2">
+	<MudStack Spacing="3">
+		<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+			<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+				<MudIcon Icon="@Icons.Material.Filled.Article" Color="Color.Primary" Size="Size.Small" />
+				<MudText Typo="Typo.h6">Logs</MudText>
+			</MudStack>
+			<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+				<MudSelect T="string" Value="@_levelFilter" ValueChanged="LevelFilterChanged" Margin="Margin.Dense" Dense="true"
+					AnchorOrigin="Origin.BottomLeft" Style="width: 150px;">
+					<MudSelectItem T="string" Value="@("information")">Information and up</MudSelectItem>
+					<MudSelectItem T="string" Value="@("warning")">Warnings and errors</MudSelectItem>
+					<MudSelectItem T="string" Value="@("error")">Errors only</MudSelectItem>
+				</MudSelect>
+				<MudTextField T="string" Value="@_searchTerm" ValueChanged="SearchChanged" Placeholder="Search logs"
+					Immediate="true" Clearable="true" Margin="Margin.Dense" Adornment="Adornment.Start"
+					AdornmentIcon="@Icons.Material.Filled.Search" AdornmentColor="Color.Default"
+					Style="min-width: 220px;" />
+				<MudTooltip Text="Clear the in-memory log view (entries remain in the log file)">
+					<MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Color="Color.Default" OnClick="ClearLogs" aria-label="Clear logs" />
+				</MudTooltip>
+			</MudStack>
+		</MudStack>
+		<MudTable Items="@FilteredEntries" Dense="true" Hover="true" FixedHeader="true" Height="65vh">
+			<HeaderContent>
+				<MudTh Style="width: 200px;">Time</MudTh>
+				<MudTh Style="width: 130px;">Level</MudTh>
+				<MudTh Style="width: 260px;">Category</MudTh>
+				<MudTh>Message</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd DataLabel="Time" Style="white-space: nowrap;">@context.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")</MudTd>
+				<MudTd DataLabel="Level">
+					<MudChip T="string" Color="@LevelColor(context.Level)" Size="Size.Small" Variant="Variant.Filled">@context.Level</MudChip>
+				</MudTd>
+				<MudTd DataLabel="Category">
+					<MudText Typo="Typo.body2" Style="word-break: break-all;">@ShortCategory(context.Category)</MudText>
+				</MudTd>
+				<MudTd DataLabel="Message" Style="max-width: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+					<MudTooltip Text="@context.Message" Style="max-width: 600px;">
+						<span>@context.Message</span>
+					</MudTooltip>
+					@if (context.Exception is not null)
+					{
+						<MudText Typo="Typo.caption" Class="d-block" Style="white-space: pre-wrap;">@context.Exception</MudText>
+					}
+				</MudTd>
+			</RowTemplate>
+			<NoRecordsContent>
+				<MudStack AlignItems="AlignItems.Center" Class="pa-8" Spacing="1">
+					<MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+					<MudText Color="Color.Secondary">No log entries match the current filters.</MudText>
+				</MudStack>
+			</NoRecordsContent>
+		</MudTable>
+	</MudStack>
+</MudPaper>
+
+@code
+{
+	private IReadOnlyCollection<InMemoryLogEntry> _entries = [];
+	private string _levelFilter = "information";
+	private string? _searchTerm;
+
+	protected override void OnInitialized()
+	{
+		RefreshEntries();
+		LogStore.EntriesChanged += OnEntriesChanged;
+	}
+
+	private void OnEntriesChanged()
+	{
+		RefreshEntries();
+		InvokeAsync(StateHasChanged);
+	}
+
+	private void RefreshEntries()
+	{
+		// Show the most recent entries first.
+		_entries = LogStore.Entries.Reverse().ToList();
+	}
+
+	private IEnumerable<InMemoryLogEntry> FilteredEntries =>
+		_entries.Where(x => x.Level >= MinimumLevel(_levelFilter) && MatchesSearch(x));
+
+	private bool MatchesSearch(InMemoryLogEntry entry) =>
+		string.IsNullOrWhiteSpace(_searchTerm)
+		|| entry.Message.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase)
+		|| entry.Category.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase);
+
+	private void LevelFilterChanged(string value) => _levelFilter = value;
+
+	private void SearchChanged(string value) => _searchTerm = value;
+
+	private void ClearLogs()
+	{
+		LogStore.Clear();
+
+		Snackbar.Add("Log view cleared. Entries are still available in the log file.", Severity.Info);
+	}
+
+	/// <summary>
+	/// Strips the common application namespace so categories fit in the column without wrapping.
+	/// </summary>
+	private static string ShortCategory(string category) =>
+		category.StartsWith("MPRSGxZ.", StringComparison.Ordinal) ? category["MPRSGxZ.".Length..] : category;
+
+	private static LogLevel MinimumLevel(string filter) => filter switch
+	{
+		"warning" => LogLevel.Warning,
+		"error" => LogLevel.Error,
+		_ => LogLevel.Information
+	};
+
+	private static Color LevelColor(LogLevel level) => level switch
+	{
+		LogLevel.Error => Color.Error,
+		LogLevel.Warning => Color.Warning,
+		LogLevel.Information => Color.Info,
+		_ => Color.Default
+	};
+
+	public void Dispose()
+	{
+		LogStore.EntriesChanged -= OnEntriesChanged;
+	}
+}

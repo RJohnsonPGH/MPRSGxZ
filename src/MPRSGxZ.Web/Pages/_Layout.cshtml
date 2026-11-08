@@ -1,0 +1,54 @@
+﻿@using Microsoft.AspNetCore.Components.Web
+@namespace MPRSGxZ.Web.Pages
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta name="description" content="Web interface for controlling Monolith MPRSG series amplifiers." />
+		<meta name="color-scheme" content="light dark" />
+		<base href="~/" />
+		<link rel="stylesheet" href="css/MudOverride.css" />
+		<link href="WebAmp.styles.css" rel="stylesheet" />
+		<link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet" />
+		<link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+		
+		<component type="typeof(HeadOutlet)" render-mode="ServerPrerendered" />
+		@* HeadOutlet stays prerendered so the page <title> is correct in the initial HTML. *@
+
+		<script>
+			// Theme preference backing the dark mode switch: a stored choice wins, otherwise follow the
+			// operating system preference. The layout reads this during startup and writes it on toggle.
+			window.mprsTheme = {
+				get: function () {
+					var stored = localStorage.getItem('mprsgxz-theme');
+					if (stored === 'dark') { return true; }
+					if (stored === 'light') { return false; }
+					return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+				},
+				set: function (isDark) {
+					localStorage.setItem('mprsgxz-theme', isDark ? 'dark' : 'light');
+				}
+			};
+		</script>
+	</head>
+	<body>
+		@RenderBody()
+
+		<div id="blazor-error-ui">
+			<environment include="Staging,Production">
+				An error has occurred. This application may no longer respond until reloaded.
+			</environment>
+			<environment include="Development">
+				An unhandled exception has occurred. See browser dev tools for details.
+			</environment>
+			<a href="" class="reload">Reload</a>
+			<a class="dismiss">🗙</a>
+		</div>
+
+		<script src="_framework/blazor.server.js"></script>
+		<script src="_content/MudBlazor/MudBlazor.min.js"></script>
+	</body>
+</html>

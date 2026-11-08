@@ -1,0 +1,40 @@
+﻿div.mud-select-input { margin-top: 0 !important; }
+label.mud-switch { margin-right: 0 !important; margin-inline-end: 0 !important; }
+
+.app-title {
+	letter-spacing: 0.06em;
+	font-weight: 500;
+	user-select: none;
+}
+
+.nav-brand {
+	letter-spacing: 0.06em;
+	font-weight: 500;
+	user-select: none;
+}
+
+#blazor-error-ui {
+	background: #b71c1c;
+	bottom: 0;
+	box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
+	color: #ffffff;
+	display: none;
+	left: 0;
+	padding: 0.75rem 1.5rem;
+	position: fixed;
+	width: 100%;
+	z-index: 9999;
+	font-family: Roboto, "Helvetica Neue", sans-serif;
+}
+
+	#blazor-error-ui .reload {
+		color: #ffffff;
+		font-weight: 500;
+		margin-left: 1rem;
+	}
+
+	#blazor-error-ui .dismiss {
+		cursor: pointer;
+		float: right;
+		opacity: 0.8;
+	}
